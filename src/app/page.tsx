@@ -508,8 +508,10 @@ export default function Home() {
       if (error) throw error;
       const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(path);
 
+      // preview는 blob URL 그대로 유지 — 다음 회전이 캐시 없이 최신 blob을 소스로 사용
+      // supabaseUrl만 갱신해 DB 저장에 반영
       setItems(prev => prev.map(it => it.id === itemId
-        ? { ...it, [slot]: { preview: publicUrl, supabaseUrl: publicUrl, uploading: false } } : it));
+        ? { ...it, [slot]: { preview: newPreview, supabaseUrl: publicUrl, uploading: false } } : it));
     } catch (err) {
       console.error('Rotate upload:', err);
       setItems(prev => prev.map(it => it.id === itemId
