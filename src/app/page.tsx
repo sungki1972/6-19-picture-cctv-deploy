@@ -154,25 +154,28 @@ async function dbLoad(rid: string): Promise<{ report: ReportInfo; items: PhotoIt
 // ── Sub-components ─────────────────────────────────────────────────
 
 function PhotoUpload({
-  photo, label, onFile, tall = false,
+  photo, label, onFile, square = false,
 }: {
-  photo: PhotoInfo; label: string; onFile: (f: File) => void; tall?: boolean;
+  photo: PhotoInfo; label: string; onFile: (f: File) => void; square?: boolean;
 }) {
   const ref = useRef<HTMLInputElement>(null);
   return (
     <div
       onClick={() => ref.current?.click()}
-      className="relative flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors overflow-hidden"
-      style={{ minHeight: tall ? 260 : 180 }}
+      className="relative flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-violet-400 hover:bg-violet-50 transition-colors overflow-hidden w-full"
+      style={square
+        ? { aspectRatio: '1 / 1' }
+        : { minHeight: 180 }}
     >
       <input ref={ref} type="file" accept="image/*" className="hidden"
         onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; }} />
       {photo.preview
         // eslint-disable-next-line @next/next/no-img-element
-        ? <img src={photo.preview} alt={label} className="w-full h-full object-cover"
-            style={{ maxHeight: tall ? 300 : 200 }} />
+        ? <img src={photo.preview} alt={label}
+            className="absolute inset-0 w-full h-full"
+            style={{ objectFit: square ? 'contain' : 'cover', backgroundColor: square ? '#f8f8f8' : 'transparent' }} />
         : <div className="flex flex-col items-center py-10 text-gray-400 select-none">
-            <span className="text-4xl mb-2">{tall ? '📱' : '📷'}</span>
+            <span className="text-4xl mb-2">{square ? '📱' : '📷'}</span>
             <span className="text-sm font-medium">{label}</span>
             <span className="text-xs mt-1">클릭하여 선택</span>
           </div>
@@ -257,11 +260,14 @@ function PrintMobile({ item, num }: { item: PhotoItem; num: number }) {
           </td>
         </tr>
         <tr>
-          <td style={{ border: B, height: 240, textAlign: 'center', verticalAlign: 'middle', padding: 6 }}>
+          <td style={{ border: B, textAlign: 'center', verticalAlign: 'middle', padding: 6, backgroundColor: '#f8f8f8' }}>
             {item.photo.preview
               // eslint-disable-next-line @next/next/no-img-element
-              ? <img src={item.photo.preview} alt="캡처" style={{ maxWidth: '96%', maxHeight: 228, objectFit: 'contain' }} />
-              : <span style={{ color: '#bbb', fontSize: '9pt' }}>사진 없음</span>
+              ? <img src={item.photo.preview} alt="캡처"
+                  style={{ width: 260, height: 260, objectFit: 'contain', display: 'block', margin: '0 auto', backgroundColor: '#f8f8f8' }} />
+              : <div style={{ width: 260, height: 260, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto' }}>
+                  <span style={{ color: '#bbb', fontSize: '9pt' }}>사진 없음</span>
+                </div>
             }
           </td>
         </tr>
@@ -499,9 +505,9 @@ export default function Home() {
                 </div>
               ) : (
                 <div className="mb-4">
-                  <p className="text-xs font-semibold text-violet-600 mb-1.5">캡처 사진</p>
+                  <p className="text-xs font-semibold text-violet-600 mb-1.5">캡처 사진 (1:1)</p>
                   <PhotoUpload photo={item.photo} label="모바일 캡처 사진"
-                    onFile={f => uploadPhoto(f, item.id, 'photo')} tall />
+                    onFile={f => uploadPhoto(f, item.id, 'photo')} square />
                 </div>
               )}
 
