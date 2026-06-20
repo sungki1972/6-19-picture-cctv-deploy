@@ -301,6 +301,7 @@ export default function Home() {
   const [report, setReport] = useState<ReportInfo>(defaultReport);
   const [items, setItems]   = useState<PhotoItem[]>([]);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [copied, setCopied] = useState(false);
 
   const loadedRef    = useRef(false);
   const sessionRef   = useRef('');
@@ -312,11 +313,21 @@ export default function Home() {
   useEffect(() => { reportRef.current = report; }, [report]);
   useEffect(() => { itemsRef.current  = items;  }, [items]);
 
-  // ── Mount: load from DB → fallback to localStorage ──
+  // ── Mount: URL ?id= → localStorage → 신규 ──
   useEffect(() => {
     (async () => {
-      sessionRef.current  = getSessionId();
-      reportIdRef.current = getReportId();
+      sessionRef.current = getSessionId();
+
+      // URL에 ?id= 있으면 최우선 사용
+      const urlParams = new URLSearchParams(window.location.search);
+      let rid = urlParams.get('id');
+      if (!rid) {
+        // URL에 없으면 localStorage 또는 신규 생성
+        rid = localStorage.getItem('cctv-report-id') ?? crypto.randomUUID();
+        window.history.replaceState({}, '', `?id=${rid}`);
+      }
+      localStorage.setItem('cctv-report-id', rid);
+      reportIdRef.current = rid;
 
       const remote = await dbLoad(reportIdRef.current);
       if (remote) {
@@ -421,9 +432,16 @@ export default function Home() {
     localStorage.setItem('cctv-report-id', newId);
     localStorage.removeItem(LS_KEY);
     reportIdRef.current = newId;
+    window.history.replaceState({}, '', `?id=${newId}`);
     setReport(defaultReport);
     setItems([]);
     setSaveStatus('idle');
+  };
+
+  const copyLink = () => {
+    navigator.clipboard.writeText(window.location.href);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
   };
 
   // ── Print chunks (2 items per A4 page) ──
@@ -441,9 +459,18 @@ export default function Home() {
       <div className="print:hidden min-h-screen bg-slate-50">
 
         {/* Header */}
-        <header className="bg-blue-700 text-white px-5 py-3.5 flex items-center gap-3 shadow-md">
+        <header className="bg-blue-700 text-white px-5 py-3.5 flex items-center gap-2 shadow-md">
           <h1 className="text-lg font-bold tracking-wide flex-1">🏗️ 공사 사진대장</h1>
           <SaveBadge status={saveStatus} />
+          <button onClick={copyLink}
+            className={`text-xs px-3 py-1.5 rounded-lg border transition-all ${
+              copied
+                ? 'bg-green-500 border-green-400 text-white'
+                : 'text-white/70 hover:text-white border-white/30 hover:border-white/60'
+            }`}
+            title="이 링크를 다른 기기에서 열면 같은 데이터를 볼 수 있습니다">
+            {copied ? '✓ 복사됨' : '🔗 링크 복사'}
+          </button>
           <button onClick={handleReset}
             className="text-white/70 hover:text-white text-xs border border-white/30 hover:border-white/60 px-3 py-1.5 rounded-lg transition-colors">
             새 보고서
