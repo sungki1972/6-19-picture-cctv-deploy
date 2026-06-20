@@ -153,10 +153,49 @@ async function dbLoad(rid: string): Promise<{ report: ReportInfo; items: PhotoIt
 
 // ── Sub-components ─────────────────────────────────────────────────
 
+// ── 이미지 회전 (Canvas) ───────────────────────────────────────────
+async function rotateImageBlob(previewUrl: string, deg: 90 | -90): Promise<Blob> {
+  // 외부 URL(Supabase)은 fetch → blob URL 변환 후 canvas에 그림 (CORS 우회)
+  let objectUrl = previewUrl;
+  let isTempUrl = false;
+  if (!previewUrl.startsWith('blob:')) {
+    const res = await fetch(previewUrl);
+    const blob = await res.blob();
+    objectUrl = URL.createObjectURL(blob);
+    isTempUrl = true;
+  }
+
+  try {
+    return await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        // 90° 회전 시 가로·세로 교환
+        canvas.width  = img.height;
+        canvas.height = img.width;
+        const ctx = canvas.getContext('2d')!;
+        ctx.translate(canvas.width / 2, canvas.height / 2);
+        ctx.rotate((deg * Math.PI) / 180);
+        ctx.drawImage(img, -img.width / 2, -img.height / 2);
+        canvas.toBlob(b => (b ? resolve(b) : reject(new Error('toBlob failed'))), 'image/jpeg', 0.92);
+      };
+      img.onerror = reject;
+      img.src = objectUrl;
+    });
+  } finally {
+    if (isTempUrl) URL.revokeObjectURL(objectUrl);
+  }
+}
+
+// ── Photo Upload Area ──────────────────────────────────────────────
 function PhotoUpload({
-  photo, label, onFile, square = false,
+  photo, label, onFile, onRotate, square = false,
 }: {
-  photo: PhotoInfo; label: string; onFile: (f: File) => void; square?: boolean;
+  photo: PhotoInfo;
+  label: string;
+  onFile: (f: File) => void;
+  onRotate?: (deg: 90 | -90) => void;
+  square?: boolean;
 }) {
   const uid = useId();
   return (
@@ -185,11 +224,28 @@ function PhotoUpload({
               backgroundColor: square ? '#f5f5f5' : 'transparent',
             }}
           />
-          {/* 변경 뱃지 */}
+          {/* 하단 컨트롤 바 */}
           {!photo.uploading && (
-            <span className="absolute bottom-2 right-2 bg-black/60 text-white rounded-full px-2.5 py-0.5 text-xs font-medium z-10">
-              📷 변경
-            </span>
+            <div className="absolute bottom-0 inset-x-0 z-10 flex items-center justify-between px-2 py-1.5 bg-gradient-to-t from-black/70 via-black/40 to-transparent">
+              {/* 회전 버튼 */}
+              {onRotate && (
+                <div className="flex gap-1">
+                  <button
+                    type="button"
+                    onClick={e => { e.preventDefault(); e.stopPropagation(); onRotate(-90); }}
+                    title="왼쪽으로 90° 회전"
+                    className="bg-white/25 hover:bg-white/50 text-white rounded-md w-8 h-7 flex items-center justify-center text-base transition-colors"
+                  >↺</button>
+                  <button
+                    type="button"
+                    onClick={e => { e.preventDefault(); e.stopPropagation(); onRotate(90); }}
+                    title="오른쪽으로 90° 회전"
+                    className="bg-white/25 hover:bg-white/50 text-white rounded-md w-8 h-7 flex items-center justify-center text-base transition-colors"
+                  >↻</button>
+                </div>
+              )}
+              <span className="text-white/80 text-xs ml-auto">📷 변경</span>
+            </div>
           )}
         </>
       ) : (
@@ -202,7 +258,7 @@ function PhotoUpload({
 
       {photo.uploading && (
         <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20">
-          <span className="text-white text-sm font-semibold">업로드 중...</span>
+          <span className="text-white text-sm font-semibold">회전 저장 중...</span>
         </div>
       )}
     </label>
@@ -426,6 +482,41 @@ export default function Home() {
   const updateItem = (id: string, fn: (it: PhotoItem) => PhotoItem) =>
     setItems(prev => prev.map(it => it.id === id ? fn(it) : it));
 
+  // ── 사진 회전 ──
+  const rotatePhoto = async (itemId: string, slot: 'before' | 'after' | 'photo', deg: 90 | -90) => {
+    const item = itemsRef.current.find(it => it.id === itemId);
+    if (!item) return;
+    const src = item[slot].preview;
+    if (!src) return;
+
+    // 업로드 중 스피너 표시
+    setItems(prev => prev.map(it => it.id === itemId
+      ? { ...it, [slot]: { ...it[slot], uploading: true } } : it));
+
+    try {
+      const rotatedBlob = await rotateImageBlob(src, deg);
+      const newPreview = URL.createObjectURL(rotatedBlob);
+
+      // 로컬 미리보기 즉시 반영
+      setItems(prev => prev.map(it => it.id === itemId
+        ? { ...it, [slot]: { preview: newPreview, supabaseUrl: it[slot].supabaseUrl, uploading: true } } : it));
+
+      // Supabase에 덮어쓰기 업로드
+      const file = new File([rotatedBlob], `${slot}.jpg`, { type: 'image/jpeg' });
+      const path = `${sessionRef.current}/${itemId}/${slot}.jpg`;
+      const { error } = await supabase.storage.from(BUCKET).upload(path, file, { upsert: true });
+      if (error) throw error;
+      const { data: { publicUrl } } = supabase.storage.from(BUCKET).getPublicUrl(path);
+
+      setItems(prev => prev.map(it => it.id === itemId
+        ? { ...it, [slot]: { preview: publicUrl, supabaseUrl: publicUrl, uploading: false } } : it));
+    } catch (err) {
+      console.error('Rotate upload:', err);
+      setItems(prev => prev.map(it => it.id === itemId
+        ? { ...it, [slot]: { ...it[slot], uploading: false } } : it));
+    }
+  };
+
   const handleReset = () => {
     if (!confirm('새 보고서를 시작합니다. 현재 데이터가 초기화됩니다.')) return;
     const newId = crypto.randomUUID();
@@ -575,19 +666,23 @@ export default function Home() {
                   <div>
                     <p className="text-xs font-semibold text-gray-500 mb-1.5">공사 전</p>
                     <PhotoUpload photo={item.before} label="공사 전 사진"
-                      onFile={f => uploadPhoto(f, item.id, 'before')} />
+                      onFile={f => uploadPhoto(f, item.id, 'before')}
+                      onRotate={deg => rotatePhoto(item.id, 'before', deg)} />
                   </div>
                   <div>
                     <p className="text-xs font-semibold text-gray-500 mb-1.5">공사 후</p>
                     <PhotoUpload photo={item.after} label="공사 후 사진"
-                      onFile={f => uploadPhoto(f, item.id, 'after')} />
+                      onFile={f => uploadPhoto(f, item.id, 'after')}
+                      onRotate={deg => rotatePhoto(item.id, 'after', deg)} />
                   </div>
                 </div>
               ) : (
                 <div className="mb-4">
                   <p className="text-xs font-semibold text-violet-600 mb-1.5">캡처 사진 (1:1)</p>
                   <PhotoUpload photo={item.photo} label="모바일 캡처 사진"
-                    onFile={f => uploadPhoto(f, item.id, 'photo')} square />
+                    onFile={f => uploadPhoto(f, item.id, 'photo')}
+                    onRotate={deg => rotatePhoto(item.id, 'photo', deg)}
+                    square />
                 </div>
               )}
 
