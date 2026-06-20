@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useId } from 'react';
 import { supabase, BUCKET } from '@/lib/supabase';
 
 // ── Types ──────────────────────────────────────────────────────────
@@ -158,39 +158,54 @@ function PhotoUpload({
 }: {
   photo: PhotoInfo; label: string; onFile: (f: File) => void; square?: boolean;
 }) {
-  const ref = useRef<HTMLInputElement>(null);
+  const uid = useId();
   return (
-    <div
-      onClick={() => ref.current?.click()}
-      className="relative flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-violet-400 hover:bg-violet-50 transition-colors overflow-hidden w-full"
-      style={square
-        ? { aspectRatio: '1 / 1' }
-        : { minHeight: 180 }}
+    <label
+      htmlFor={uid}
+      className="relative flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors overflow-hidden w-full select-none"
+      style={square ? { aspectRatio: '1 / 1' } : { minHeight: 180 }}
     >
-      <input ref={ref} type="file" accept="image/*" className="hidden"
-        onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; }} />
-      {photo.preview
-        // eslint-disable-next-line @next/next/no-img-element
-        ? <img src={photo.preview} alt={label}
+      <input
+        id={uid}
+        type="file"
+        accept="image/*"
+        className="sr-only"
+        onChange={e => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ''; }}
+      />
+
+      {photo.preview ? (
+        <>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={photo.preview}
+            alt={label}
             className="absolute inset-0 w-full h-full"
-            style={{ objectFit: square ? 'contain' : 'cover', backgroundColor: square ? '#f8f8f8' : 'transparent' }} />
-        : <div className="flex flex-col items-center py-10 text-gray-400 select-none">
-            <span className="text-4xl mb-2">{square ? '📱' : '📷'}</span>
-            <span className="text-sm font-medium">{label}</span>
-            <span className="text-xs mt-1">클릭하여 선택</span>
-          </div>
-      }
+            style={{
+              objectFit: square ? 'contain' : 'cover',
+              backgroundColor: square ? '#f5f5f5' : 'transparent',
+            }}
+          />
+          {/* 변경 뱃지 */}
+          {!photo.uploading && (
+            <span className="absolute bottom-2 right-2 bg-black/60 text-white rounded-full px-2.5 py-0.5 text-xs font-medium z-10">
+              📷 변경
+            </span>
+          )}
+        </>
+      ) : (
+        <div className="flex flex-col items-center py-10 text-gray-400">
+          <span className="text-4xl mb-2">{square ? '📱' : '📷'}</span>
+          <span className="text-sm font-medium">{label}</span>
+          <span className="text-xs mt-1">클릭하여 선택</span>
+        </div>
+      )}
+
       {photo.uploading && (
-        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
+        <div className="absolute inset-0 bg-black/50 flex items-center justify-center z-20">
           <span className="text-white text-sm font-semibold">업로드 중...</span>
         </div>
       )}
-      {photo.preview && !photo.uploading && (
-        <div className="absolute bottom-1.5 right-1.5 bg-white/90 rounded-full px-2 py-0.5 text-xs text-gray-600 shadow">
-          변경
-        </div>
-      )}
-    </div>
+    </label>
   );
 }
 
@@ -386,6 +401,17 @@ export default function Home() {
 
   const deleteItem = (id: string) => setItems(prev => prev.filter(it => it.id !== id));
 
+  const moveItem = (id: string, dir: -1 | 1) =>
+    setItems(prev => {
+      const idx = prev.findIndex(it => it.id === id);
+      if (idx < 0) return prev;
+      const next = [...prev];
+      const target = idx + dir;
+      if (target < 0 || target >= next.length) return prev;
+      [next[idx], next[target]] = [next[target], next[idx]];
+      return next;
+    });
+
   const updateItem = (id: string, fn: (it: PhotoItem) => PhotoItem) =>
     setItems(prev => prev.map(it => it.id === id ? fn(it) : it));
 
@@ -466,18 +492,45 @@ export default function Home() {
 
               {/* Card header */}
               <div className="flex items-center gap-2 mb-4 pb-3 border-b border-gray-100">
-                <span className={`text-xs font-bold px-2.5 py-1 rounded-full
+                {/* 타입 뱃지 */}
+                <span className={`text-xs font-bold px-2.5 py-1 rounded-full shrink-0
                   ${item.type === 'pair'
                     ? 'bg-blue-100 text-blue-700'
                     : 'bg-violet-100 text-violet-700'}`}>
                   {item.type === 'pair' ? '📷 공사 전/후' : '📱 모바일 캡처'}
                 </span>
-                <span className="text-xs text-gray-400">항목 {idx + 1}</span>
+                <span className="text-xs text-gray-400 shrink-0">항목 {idx + 1}</span>
                 <div className="flex-1" />
-                <button onClick={() => deleteItem(item.id)}
-                  className="text-gray-300 hover:text-red-400 transition-colors text-lg leading-none">
-                  ×
-                </button>
+
+                {/* 순서 이동 + 삭제 버튼 그룹 */}
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => moveItem(item.id, -1)}
+                    disabled={idx === 0}
+                    title="위로 이동"
+                    className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                  >
+                    ▲
+                  </button>
+                  <button
+                    onClick={() => moveItem(item.id, 1)}
+                    disabled={idx === items.length - 1}
+                    title="아래로 이동"
+                    className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
+                  >
+                    ▼
+                  </button>
+                  <div className="w-px h-4 bg-gray-200 mx-1" />
+                  <button
+                    onClick={() => {
+                      if (confirm(`항목 ${idx + 1}을 삭제하시겠습니까?`)) deleteItem(item.id);
+                    }}
+                    title="삭제"
+                    className="w-8 h-8 flex items-center justify-center rounded-lg text-gray-300 hover:text-red-500 hover:bg-red-50 transition-colors text-base"
+                  >
+                    🗑
+                  </button>
+                </div>
               </div>
 
               {/* 항목명 */}
