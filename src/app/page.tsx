@@ -198,11 +198,33 @@ function PhotoUpload({
   square?: boolean;
 }) {
   const uid = useId();
+  const [ratio, setRatio] = useState<number | null>(null);
+  const [frameMode, setFrameMode] = useState<'auto' | 'portrait' | 'landscape'>('auto');
+
+  // 사진이 바뀌면 측정값·수동 프레임 모드 초기화 (회전 시 새 blob URL → 재측정 → 자동 방향 반영).
+  // 렌더 중 직전 값과 비교해 리셋 — effect 안 setState 회피 (React 권장 패턴)
+  const [prevPreview, setPrevPreview] = useState(photo.preview);
+  if (photo.preview !== prevPreview) {
+    setPrevPreview(photo.preview);
+    setRatio(null);
+    setFrameMode('auto');
+  }
+
+  // 프레임 종횡비(가로/세로): 수동 모드 우선, 자동은 사진 실측 비율(과도한 높이 방지 위해 0.5~2 클램프)
+  const effRatio =
+    frameMode === 'portrait'  ? 3 / 4 :
+    frameMode === 'landscape' ? 4 / 3 :
+    ratio ? Math.min(Math.max(ratio, 0.5), 2) : (square ? 1 : 4 / 3);
+
+  const orientLabel = frameMode === 'auto' ? '자동' : frameMode === 'portrait' ? '세로' : '가로';
+  const cycleFrame = () =>
+    setFrameMode(m => (m === 'auto' ? 'portrait' : m === 'portrait' ? 'landscape' : 'auto'));
+
   return (
     <label
       htmlFor={uid}
       className="relative flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-xl cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-colors overflow-hidden w-full select-none"
-      style={square ? { aspectRatio: '1 / 1' } : { minHeight: 180 }}
+      style={photo.preview ? { aspectRatio: String(effRatio), backgroundColor: '#f5f5f5' } : { minHeight: 180 }}
     >
       <input
         id={uid}
@@ -218,32 +240,44 @@ function PhotoUpload({
           <img
             src={photo.preview}
             alt={label}
-            className="absolute inset-0 w-full h-full"
-            style={{
-              objectFit: square ? 'contain' : 'cover',
-              backgroundColor: square ? '#f5f5f5' : 'transparent',
+            onLoad={e => {
+              const t = e.currentTarget;
+              if (t.naturalWidth && t.naturalHeight) setRatio(t.naturalWidth / t.naturalHeight);
             }}
+            className="absolute inset-0 w-full h-full"
+            style={{ objectFit: 'contain', backgroundColor: '#f5f5f5' }}
           />
           {/* 하단 컨트롤 바 */}
           {!photo.uploading && (
             <div className="absolute bottom-0 inset-x-0 z-10 flex items-center justify-between px-2 py-1.5 bg-gradient-to-t from-black/70 via-black/40 to-transparent">
-              {/* 회전 버튼 */}
-              {onRotate && (
-                <div className="flex gap-1">
-                  <button
-                    type="button"
-                    onClick={e => { e.preventDefault(); e.stopPropagation(); onRotate(-90); }}
-                    title="왼쪽으로 90° 회전"
-                    className="bg-white/25 hover:bg-white/50 text-white rounded-md w-8 h-7 flex items-center justify-center text-base transition-colors"
-                  >↺</button>
-                  <button
-                    type="button"
-                    onClick={e => { e.preventDefault(); e.stopPropagation(); onRotate(90); }}
-                    title="오른쪽으로 90° 회전"
-                    className="bg-white/25 hover:bg-white/50 text-white rounded-md w-8 h-7 flex items-center justify-center text-base transition-colors"
-                  >↻</button>
-                </div>
-              )}
+              <div className="flex gap-1">
+                {/* 사진 회전 (픽셀) */}
+                {onRotate && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); onRotate(-90); }}
+                      title="왼쪽으로 90° 회전"
+                      className="bg-white/25 hover:bg-white/50 text-white rounded-md w-8 h-7 flex items-center justify-center text-base transition-colors"
+                    >↺</button>
+                    <button
+                      type="button"
+                      onClick={e => { e.preventDefault(); e.stopPropagation(); onRotate(90); }}
+                      title="오른쪽으로 90° 회전"
+                      className="bg-white/25 hover:bg-white/50 text-white rounded-md w-8 h-7 flex items-center justify-center text-base transition-colors"
+                    >↻</button>
+                  </>
+                )}
+                {/* 프레임 방향 전환 */}
+                <button
+                  type="button"
+                  onClick={e => { e.preventDefault(); e.stopPropagation(); cycleFrame(); }}
+                  title="프레임 방향 전환 (자동 → 세로 → 가로)"
+                  className="bg-white/25 hover:bg-white/50 text-white rounded-md h-7 px-2 flex items-center justify-center gap-1 text-xs font-semibold transition-colors"
+                >
+                  <span className="text-base leading-none">⤢</span>{orientLabel}
+                </button>
+              </div>
               <span className="text-white/80 text-xs ml-auto">📷 변경</span>
             </div>
           )}
@@ -335,7 +369,7 @@ function PrintMobile({ item, num }: { item: PhotoItem; num: number }) {
             {item.photo.preview
               // eslint-disable-next-line @next/next/no-img-element
               ? <img src={item.photo.preview} alt="캡처"
-                  style={{ width: 260, height: 260, objectFit: 'contain', display: 'block', margin: '0 auto', backgroundColor: '#f8f8f8' }} />
+                  style={{ maxWidth: 280, maxHeight: 320, width: 'auto', height: 'auto', objectFit: 'contain', display: 'block', margin: '0 auto', backgroundColor: '#f8f8f8' }} />
               : <div style={{ width: 260, height: 260, display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto' }}>
                   <span style={{ color: '#bbb', fontSize: '9pt' }}>사진 없음</span>
                 </div>
@@ -680,7 +714,7 @@ export default function Home() {
                 </div>
               ) : (
                 <div className="mb-4">
-                  <p className="text-xs font-semibold text-violet-600 mb-1.5">캡처 사진 (1:1)</p>
+                  <p className="text-xs font-semibold text-violet-600 mb-1.5">캡처 사진 (방향 자동)</p>
                   <PhotoUpload photo={item.photo} label="모바일 캡처 사진"
                     onFile={f => uploadPhoto(f, item.id, 'photo')}
                     onRotate={deg => rotatePhoto(item.id, 'photo', deg)}
